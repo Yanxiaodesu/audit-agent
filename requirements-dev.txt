@@ -1,0 +1,4 @@
+# 开发/CI 需要的额外依赖（镜像里不装，保持运行时镜像精简）
+-r requirements.txt
+
+pytest>=8.0
