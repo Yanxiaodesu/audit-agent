@@ -1,0 +1,107 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  # CI 里**不调真实模型**：
+  #   - 零成本，不需要在仓库里配 API Key 的 secret
+  #   - mock 模式走的是同一套循环代码（工具调用、消息拼装、终止条件），
+  #     所以路径覆盖不打折，而且结果确定、不会 flaky
+  LLM_MODE: mock
+  DB_HOST: 127.0.0.1
+  DB_PORT: "3306"
+  DB_USER: root
+  DB_PASSWORD: root
+  LOG_FORMAT: json
+
+jobs:
+  # ============================================================
+  # 测试 + 端到端冒烟
+  # ============================================================
+  test:
+    name: 测试与冒烟
+    runs-on: ubuntu-latest
+
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot --silent"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: 安装依赖
+        run: pip install -r requirements-dev.txt
+
+      - name: 初始化数据库
+        run: python scripts/bootstrap.py --wait 90
+
+      - name: 跑测试套件
+        run: python -m pytest tests/ -q
+
+      - name: 起 API 与 worker
+        run: |
+          python -m uvicorn app.main:app --host 127.0.0.1 --port 8100 --log-level warning &
+          python -u worker.py --interval 0.3 --quiet &
+          sleep 10
+
+      - name: 端到端冒烟
+        run: python scripts/smoke.py --base-url http://127.0.0.1:8100
+
+      - name: 失败时打印服务日志
+        if: failure()
+        run: |
+          echo "--- 队列状态 ---"
+          python -c "
+          import pymysql
+          from pymysql.cursors import DictCursor
+          c = pymysql.connect(host='127.0.0.1', user='root', password='root',
+                              database='audit_agent', cursorclass=DictCursor)
+          cur = c.cursor()
+          cur.execute('SELECT status, COUNT(*) n FROM audit_jobs GROUP BY status')
+          print(cur.fetchall())
+          cur.execute('SELECT id, item_id, error FROM audit_jobs WHERE status=\"failed\" LIMIT 5')
+          print(cur.fetchall())
+          "
+
+  # ============================================================
+  # 镜像能构建 —— 这是面试官拿到项目后做的第一件事，
+  # 所以必须由 CI 保证它一直是好的
+  # ============================================================
+  docker:
+    name: 镜像构建
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: 构建镜像
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: audit-agent:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: 校验 compose 配置合法
+        run: docker compose config --quiet

@@ -1,0 +1,32 @@
+# 不要把本地的密钥、缓存、虚拟环境打进镜像
+.env
+.venv
+venv
+env
+
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+.git/
+.gitignore
+.github/
+
+# 本地开发脚本（Windows 批处理），容器里用不到
+start-*.cmd
+
+# 文档
+*.md
+docs/
+
+# 编辑器
+.vscode/
+.idea/
+*.swp
+
+# 数据库本地数据（如果有的话）
+*.sqlite
+*.db
+mysql_data/

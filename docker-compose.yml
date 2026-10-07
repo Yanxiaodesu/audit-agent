@@ -1,0 +1,94 @@
+# 一键起全套：MySQL + 初始化 + API + worker
+#
+#   docker compose up -d --build
+#   然后打开 http://127.0.0.1:8100
+#
+# LLM 相关配置从项目根目录的 .env 读取（compose 会自动加载它做变量替换）。
+# 没配 LLM_API_KEY 也能跑 —— 审核会走「规则引擎 + 人工复核」。
+name: audit-agent
+
+services:
+  # ------------------------------------------------------------
+  # MySQL 8：ngram 全文索引是 search_similar_items 的依赖
+  # 官方镜像自带 ngram 解析器，不需要额外插件
+  # ------------------------------------------------------------
+  mysql:
+    image: mysql:8.0
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+      - --ngram_token_size=2
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:-root}
+    ports:
+      # 默认映射到 3307：避免和本机已有的 MySQL（3306）撞端口
+      - "${MYSQL_PORT:-3307}:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+  # ------------------------------------------------------------
+  # 初始化：建库建表 + 灌种子数据。幂等，可以反复跑。
+  # 跑完就退出，api / worker 等它成功才开始。
+  # ------------------------------------------------------------
+  bootstrap:
+    build: .
+    command: python scripts/bootstrap.py --wait 120
+    environment: &appenv
+      # 容器之间用服务名互访，不是 127.0.0.1
+      DB_HOST: mysql
+      DB_PORT: "3306"
+      DB_USER: root
+      DB_PASSWORD: ${DB_PASSWORD:-root}
+      # LLM（留空则审核降级为「规则引擎 + 人工复核」）
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://api.deepseek.com/v1}
+      LLM_MODEL: ${LLM_MODEL:-deepseek-chat}
+      LLM_MODE: ${LLM_MODE:-live}
+      LLM_TOOL_BUDGET: ${LLM_TOOL_BUDGET:-3}
+      LLM_DAILY_BUDGET: ${LLM_DAILY_BUDGET:-10.0}
+      # 容器里日志默认输出 JSON，方便被采集
+      LOG_FORMAT: ${LOG_FORMAT:-json}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      mysql:
+        condition: service_healthy
+    restart: "no"
+
+  # ------------------------------------------------------------
+  # API + 演示页面
+  # ------------------------------------------------------------
+  api:
+    build: .
+    environment: *appenv
+    ports:
+      - "${API_PORT:-8100}:8100"
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8100/health',timeout=2).status==200 else 1)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+  # ------------------------------------------------------------
+  # 审核消费者（并发 8 路由线程池，见 README「并发处理」）
+  # ------------------------------------------------------------
+  worker:
+    build: .
+    command: python -u worker.py --interval 0.5
+    environment: *appenv
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+
+volumes:
+  mysql_data:
