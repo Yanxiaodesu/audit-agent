@@ -1,0 +1,864 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>商品合规审核 Agent</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  :root{
+    --bg:#0e1318; --panel:#161d25; --panel2:#1b232c; --line:#242e39;
+    --fg:#d7dfe7; --dim:#7a8a99; --dim2:#59687a;
+    --green:#4ec9a0; --red:#e0716f; --yellow:#d9a441; --blue:#5fa8e0;
+  }
+  body{background:var(--bg);color:var(--fg);font:14px/1.6 "Microsoft YaHei","Segoe UI",system-ui,sans-serif;padding:18px}
+  .wrap{max-width:1500px;margin:0 auto}
+
+  /* ---------- 顶部 ---------- */
+  header{display:flex;align-items:flex-end;justify-content:space-between;gap:20px;margin-bottom:14px;flex-wrap:wrap}
+  h1{font-size:19px;font-weight:600;color:#eaf2f8}
+  h1 small{font-size:12px;color:var(--dim);font-weight:400;margin-left:10px}
+  .llm{font-size:12px;color:var(--dim)}
+  .llm b{font-weight:600}
+  .ok{color:var(--green)} .warn{color:var(--yellow)}
+
+  .progressbar{height:6px;background:#1a222b;border-radius:3px;overflow:hidden;margin:12px 0 6px}
+  .progressbar>i{display:block;height:100%;background:linear-gradient(90deg,#2b6cb0,#4ec9a0);transition:width .35s}
+  .progresstext{font-size:12px;color:var(--dim);display:flex;gap:16px;flex-wrap:wrap}
+
+  /* ---------- 布局 ---------- */
+  .grid{display:grid;grid-template-columns:1fr 470px;gap:16px;align-items:start}
+  @media(max-width:1180px){.grid{grid-template-columns:1fr}}
+
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;margin-bottom:16px;overflow:hidden}
+  .panel>h2{font-size:13px;font-weight:600;color:#a9bccd;padding:11px 15px;border-bottom:1px solid var(--line);
+            display:flex;align-items:center;justify-content:space-between;gap:10px}
+  .panel .body{padding:14px 15px}
+  .panel .body.tight{padding:0}
+
+  /* ---------- 控件 ---------- */
+  button{font-family:inherit;font-size:12.5px;background:var(--panel2);color:#c7d6e2;border:1px solid #2e3b48;
+         border-radius:6px;padding:6px 13px;cursor:pointer;transition:.12s;white-space:nowrap}
+  button:hover:not(:disabled){background:#25323e;border-color:#3d4d5c}
+  button:disabled{opacity:.4;cursor:not-allowed}
+  button.primary{background:#2b6cb0;border-color:#3f83c5;color:#fff;font-weight:600}
+  button.primary:hover:not(:disabled){background:#3479c2}
+  button.danger{border-color:#5a3034;color:#e0938f}
+  button.danger:hover:not(:disabled){background:#3a2124}
+  button.sm{padding:4px 10px;font-size:12px}
+
+  .toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  input[type=number],input[type=text]{font-family:inherit;font-size:13px;background:#0e1318;color:var(--fg);
+        border:1px solid #2e3b48;border-radius:6px;padding:6px 10px}
+  input[type=text]{width:100%}
+  input:focus{outline:none;border-color:#3f83c5}
+
+  .tabs{display:flex;gap:2px;padding:10px 15px 0;flex-wrap:wrap}
+  .tabs button{border-radius:6px 6px 0 0;border-bottom-color:transparent;background:transparent;color:var(--dim)}
+  .tabs button.on{background:var(--panel2);color:#e2edf6;border-color:#2e3b48;border-bottom-color:var(--panel2)}
+  .searchrow{padding:10px 15px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .chips{display:flex;gap:6px;flex-wrap:wrap}
+  .chip{font-size:11.5px;padding:3px 9px;border-radius:11px;background:#1e2833;border:1px solid #2b3742;
+        color:#8fa3b5;cursor:pointer}
+  .chip:hover{background:#28343f;color:#b6c8d8}
+
+  /* ---------- 表格 ---------- */
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th{text-align:left;color:var(--dim2);font-weight:500;font-size:11.5px;padding:8px 10px;
+     border-bottom:1px solid var(--line);background:#141b22;position:sticky;top:0}
+  td{padding:8px 10px;border-bottom:1px solid #1d252e;vertical-align:middle}
+  tbody tr{cursor:pointer}
+  tbody tr:hover td{background:#1a2430}
+  tbody tr.sel td{background:#1e3242;box-shadow:inset 3px 0 0 var(--blue)}
+  .mono{font-family:Consolas,"Courier New",monospace;font-size:12px}
+  .num{text-align:right}
+  .empty{color:var(--dim2);text-align:center;padding:26px 0;font-size:13px}
+  .pager{padding:10px 15px;display:flex;gap:8px;align-items:center;justify-content:center;
+         border-top:1px solid var(--line);font-size:12px;color:var(--dim)}
+
+  /* ---------- 标签 ---------- */
+  .tag{display:inline-block;padding:1.5px 8px;border-radius:4px;font-size:11.5px;font-weight:600;white-space:nowrap}
+  .t-APPROVE{background:#12352a;color:var(--green)}
+  .t-REJECT{background:#3a1c1e;color:var(--red)}
+  .t-REVIEW{background:#372c13;color:var(--yellow)}
+  .t-pending{background:#1e2833;color:var(--dim)}
+  .t-BLOCK{background:#3a1c1e;color:var(--red)}
+  .t-REVIEWS{background:#372c13;color:var(--yellow)}
+  .t-ok{background:#12352a;color:var(--green)}
+  .t-no{background:#3a1c1e;color:var(--red)}
+
+  /* ---------- 右侧详情 ---------- */
+  .detail{position:sticky;top:18px}
+  .dhead{padding:14px 15px;border-bottom:1px solid var(--line)}
+  .dtitle{font-size:14.5px;color:#e8f1f8;line-height:1.45;margin-bottom:8px}
+  .dmeta{font-size:12px;color:var(--dim);display:flex;gap:14px;flex-wrap:wrap}
+  .verdictbox{padding:14px 15px;border-bottom:1px solid var(--line)}
+  .vbig{font-size:16px;font-weight:700;margin-bottom:6px}
+  .v-line{font-size:12.5px;color:#a9bccd;margin-bottom:10px}
+  .reason{background:#101820;border:1px solid #202a34;border-radius:6px;padding:9px 11px;
+          font-size:12.5px;color:#b6c6d4;line-height:1.65}
+  .sec{padding:12px 15px;border-bottom:1px solid var(--line)}
+  .sec:last-child{border-bottom:none}
+  .sec h3{font-size:11.5px;color:var(--dim2);font-weight:600;margin-bottom:8px;letter-spacing:.4px}
+  .hit{display:flex;gap:8px;padding:6px 0;border-bottom:1px solid #1a222b;font-size:12px;align-items:flex-start}
+  .hit:last-child{border-bottom:none}
+  .hit .rid{font-family:Consolas,monospace;color:var(--blue);flex-shrink:0}
+  .hit .det{color:var(--dim)}
+  .tl{position:relative;padding-left:14px}
+  .tl:before{content:"";position:absolute;left:3px;top:5px;bottom:5px;width:1px;background:#25313d}
+  .tl .st{position:relative;padding:4px 0;font-size:12px;display:flex;gap:10px}
+  .tl .st:before{content:"";position:absolute;left:-14px;top:11px;width:7px;height:7px;border-radius:50%;
+                 background:#2b6cb0;border:2px solid var(--panel)}
+  .tl .st .k{color:var(--blue);width:96px;flex-shrink:0;font-family:Consolas,monospace}
+  .tl .st .t{color:var(--dim2);width:52px;text-align:right;flex-shrink:0;font-family:Consolas,monospace}
+  .kv{display:flex;justify-content:space-between;font-size:12.5px;padding:3px 0}
+  .kv span:first-child{color:var(--dim2)}
+
+  /* ---------- 评测 ---------- */
+  .metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(118px,1fr));gap:10px;margin-bottom:14px}
+  .metric{background:#101820;border:1px solid #202a34;border-radius:7px;padding:10px 12px}
+  .metric .n{font-size:21px;font-weight:700;line-height:1.25}
+  .metric .l{font-size:11px;color:var(--dim2)}
+  .cmp{width:100%;font-size:12.5px}
+  .cmp th{position:static;background:transparent}
+
+  /* ---------- 提示 ---------- */
+  #toast{position:fixed;right:20px;bottom:20px;display:flex;flex-direction:column;gap:8px;z-index:99}
+  .toast{background:#1d2833;border:1px solid #2e3b48;border-left:3px solid var(--blue);border-radius:6px;
+         padding:10px 15px;font-size:13px;box-shadow:0 6px 22px rgba(0,0,0,.5);animation:in .2s}
+  .toast.ok{border-left-color:var(--green)} .toast.err{border-left-color:var(--red)}
+  @keyframes in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+  .spin{display:inline-block;width:11px;height:11px;border:2px solid #3d4d5c;border-top-color:var(--blue);
+        border-radius:50%;animation:sp .7s linear infinite;vertical-align:-1px;margin-right:6px}
+  @keyframes sp{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div>
+      <h1>商品合规审核 Agent <small>校园二手交易平台 · BR-10 内容合规</small></h1>
+      <div class="llm" id="llmLine">连接中…</div>
+      <div class="llm" id="budgetLine" style="margin-top:3px"></div>
+      <div class="llm" id="latencyLine" style="margin-top:3px"></div>
+    </div>
+    <div class="toolbar">
+      <button class="primary" id="btnAll">▶ 一键审核全部待审核</button>
+      <button id="btnAdd">＋ 新增商品</button>
+      <button id="btnEval">跑一轮评测</button>
+      <button class="danger" id="btnReset">重置演示数据</button>
+    </div>
+  </header>
+
+  <div class="progressbar"><i id="pbar" style="width:0%"></i></div>
+  <div class="progresstext" id="ptext">加载中…</div>
+
+  <div class="grid">
+    <!-- ============ 左栏 ============ -->
+    <div>
+      <div class="panel">
+        <h2>
+          <span>商品列表</span>
+          <span class="mono" id="listCount" style="color:var(--dim2);font-weight:400"></span>
+        </h2>
+        <div class="tabs" id="tabs">
+          <button data-status="0" class="on">待审核</button>
+          <button data-status="1">已通过（在售）</button>
+          <button data-status="5">已驳回</button>
+          <button data-status="review">待人工复核<span id="rqBadge"></span></button>
+          <button data-status="-1">全部</button>
+        </div>
+        <div class="searchrow">
+          <input type="text" id="q" placeholder="搜索标题或描述…" style="flex:1;min-width:180px">
+          <button class="sm" id="btnSearch">搜索</button>
+        </div>
+        <div class="searchrow" style="padding-top:0">
+          <span style="font-size:11.5px;color:var(--dim2)">快捷样本：</span>
+          <div class="chips" id="chips">
+            <span class="chip" data-q="电子烟">违禁品</span>
+            <span class="chip" data-q="代写">学术作弊</span>
+            <span class="chip" data-q="刷单">垃圾广告</span>
+            <span class="chip" data-q="加微信">联系方式</span>
+            <span class="chip" data-q="仓鼠笼子">⚠ 误伤样本</span>
+            <span class="chip" data-q="白酒杯">⚠ 误伤样本 2</span>
+            <span class="chip" data-q="习题答案">教辅含答案</span>
+          </div>
+        </div>
+        <div class="body tight" style="max-height:520px;overflow:auto">
+          <table>
+            <thead id="thead"></thead>
+            <tbody id="rows"><tr><td colspan="6" class="empty">加载中…</td></tr></tbody>
+          </table>
+        </div>
+        <div class="pager">
+          <button class="sm" id="prev">← 上一页</button>
+          <span id="pageInfo">1 / 1</span>
+          <button class="sm" id="next">下一页 →</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ 右栏 ============ -->
+    <div class="detail">
+      <div class="panel" id="detailPanel">
+        <h2>商品详情与审核结论</h2>
+        <div id="detailBody"><div class="empty" style="padding:50px 0">
+          点左边任意一行商品查看详情<br><span style="font-size:12px">列表里的商品可以直接点行来审核</span>
+        </div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ 评测 ============ -->
+  <div class="panel" id="evalPanel" style="display:none">
+    <h2><span>评测报告</span><span class="mono" id="evalTag" style="color:var(--dim2);font-weight:400"></span></h2>
+    <div class="body" id="evalBody"></div>
+  </div>
+
+</div>
+<div id="toast"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+let state = { status: 0, q: "", offset: 0, limit: 30, total: 0, selected: null, polling: false };
+
+/* ---------------- 工具 ---------------- */
+async function api(url, opt) {
+  const r = await fetch(url, opt);
+  if (!r.ok) throw new Error((await r.text()).slice(0, 200));
+  return r.json();
+}
+function toast(msg, kind) {
+  const d = document.createElement("div");
+  d.className = "toast " + (kind || "");
+  d.innerHTML = msg;
+  $("#toast").appendChild(d);
+  setTimeout(() => d.remove(), kind === "err" ? 6000 : 3200);
+}
+function esc(s) {
+  return String(s == null ? "" : s).replace(/[&<>"']/g, c =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+function vtag(v) {
+  if (!v) return '<span class="tag t-pending">待审核</span>';
+  const cls = v === "APPROVE" ? "t-APPROVE" : v === "REJECT" ? "t-REJECT" : "t-REVIEW";
+  const txt = v === "APPROVE" ? "通过" : v === "REJECT" ? "驳回" : "转人工";
+  return `<span class="tag ${cls}">${txt}</span>`;
+}
+
+/* ---------------- 顶部进度 ---------------- */
+async function loadProgress() {
+  try {
+    const p = await api("/progress");
+    const items = p.items || {}, v = p.verdicts || {};
+    const pending = parseInt(items["0"] || 0);
+    const running = (p.jobs.pending || 0) + (p.jobs.running || 0);
+    const done = (v.APPROVE || 0) + (v.REJECT || 0) + (v.REVIEW || 0);
+    const totalItems = Object.values(items).reduce((a, b) => a + parseInt(b), 0);
+
+    $("#pbar").style.width = totalItems ? ((totalItems - pending) / totalItems * 100).toFixed(1) + "%" : "0%";
+    const rv = p.review || {};
+    $("#ptext").innerHTML =
+      `<span>商品总数 <b>${totalItems}</b></span>` +
+      `<span>待审核 <b style="color:var(--yellow)">${pending}</b></span>` +
+      `<span>已通过 <b style="color:var(--green)">${v.APPROVE || 0}</b></span>` +
+      `<span>已驳回 <b style="color:var(--red)">${v.REJECT || 0}</b></span>` +
+      `<span>AI 转人工 <b style="color:var(--yellow)">${v.REVIEW || 0}</b></span>` +
+      `<span>待人工处理 <b style="color:var(--yellow)">${rv.pending || 0}</b></span>` +
+      ((rv.approved || rv.rejected)
+        ? `<span>人工已裁决 <b style="color:var(--green)">通过 ${rv.approved || 0}</b>` +
+          ` / <b style="color:var(--red)">驳回 ${rv.rejected || 0}</b></span>`
+        : "") +
+      (running ? `<span class="spin"></span><span>队列中 ${running} 件</span>` : "");
+
+    $("#rqBadge").innerHTML = rv.pending
+      ? ` <b style="color:var(--yellow)">${rv.pending}</b>` : "";
+
+    $("#llmLine").innerHTML = p.llm_enabled
+      ? `LLM 层：<b class="ok">已启用</b>`
+      : `LLM 层：<b class="warn">未启用</b> · 当前走「规则引擎 + 人工复核」（配好 API Key 后模型自动接管灰区）`;
+    return running;
+  } catch (e) {
+    $("#llmLine").innerHTML = `<b class="no">连接失败</b>：${esc(e.message)}`;
+    return 0;
+  }
+}
+
+/* ---------------- LLM 成本护栏 ---------------- */
+async function loadBudget() {
+  const el = $("#budgetLine");
+  try {
+    const b = await api("/budget");
+    if (!b.calls_today && !b.guard_enabled) { el.innerHTML = ""; return; }
+    const pct = Math.min(100, b.budget_used_pct || 0);
+    const color = pct >= 90 ? "var(--red)" : pct >= 60 ? "var(--yellow)" : "var(--green)";
+    el.innerHTML =
+      `<span style="color:var(--dim2)">LLM 护栏</span>　` +
+      `当日调用 <b>${b.calls_today}</b>/${b.call_limit}　` +
+      `花费 <b>${(b.cost_today || 0).toFixed(4)}</b>/${b.budget} ${b.currency}` +
+      `<span style="color:${color}">(${pct}%)</span>　` +
+      `令牌 <b>${b.tokens_available}</b>/${b.burst}　` +
+      (b.degraded_today
+        ? `降级 <b style="color:var(--yellow)">${b.degraded_today}</b> 次`
+        : `<span style="color:var(--dim2)">无降级</span>`);
+  } catch (e) {
+    el.innerHTML = "";
+  }
+}
+
+/* ---------------- 延迟分位数 ---------------- */
+async function loadLatency() {
+  const el = $("#latencyLine");
+  try {
+    const l = await api("/latency?minutes=60");
+    const j = l.job;
+    if (!j.count) { el.innerHTML = ""; return; }
+    const sec = ms => (ms / 1000).toFixed(ms < 10000 ? 2 : 1) + "s";
+    const st = l.stages.llm_result;
+    el.innerHTML =
+      `<span style="color:var(--dim2)">延迟</span>　` +
+      `单件 P50 <b>${sec(j.p50_ms)}</b>　P95 <b>${sec(j.p95_ms)}</b>　P99 <b>${sec(j.p99_ms)}</b>` +
+      (st ? `　<span style="color:var(--dim2)">模型调用 P50 ${sec(st.p50_ms)}</span>` : "") +
+      `　<span style="color:var(--dim2)">样本 ${j.count}</span>`;
+  } catch (e) {
+    el.innerHTML = "";
+  }
+}
+
+/* ---------------- 商品列表 ---------------- */
+const HEAD_ITEMS = `<tr>
+  <th style="width:64px">ID</th><th>标题</th>
+  <th style="width:92px">分类</th><th style="width:70px" class="num">售价</th>
+  <th style="width:74px" class="num">卖家信用</th><th style="width:62px">状态</th></tr>`;
+
+const HEAD_REVIEW = `<tr>
+  <th style="width:64px">ID</th><th>标题</th><th>转人工原因</th>
+  <th style="width:64px" class="num">置信度</th><th style="width:124px">人工裁决</th></tr>`;
+
+async function loadItems() {
+  const tbody = $("#rows"), thead = $("#thead");
+  try {
+    /* ---- 待人工复核模式 ---- */
+    if (state.status === "review") {
+      thead.innerHTML = HEAD_REVIEW;
+      const d = await api("/review-queue?status=0&limit=100");
+      state.total = d.count;
+      $("#listCount").textContent = `待复核 ${d.summary.pending} 件`;
+      $("#pageInfo").textContent = "1 / 1";
+      $("#prev").disabled = true;
+      $("#next").disabled = true;
+
+      if (!d.items.length) {
+        tbody.innerHTML = '<tr><td colspan="5" class="empty">复核队列已清空 🎉</td></tr>';
+      } else {
+        tbody.innerHTML = d.items.map(r => `
+          <tr data-id="${r.item_id}" class="${state.selected === r.item_id ? "sel" : ""}">
+            <td class="mono">#${r.item_id}</td>
+            <td>${esc(r.title || "-")}</td>
+            <td style="color:var(--dim);font-size:12px">${esc(r.reason)}</td>
+            <td class="mono num">${r.confidence}</td>
+            <td onclick="event.stopPropagation()">
+              <button class="sm" onclick="humanDecide(${r.item_id},'APPROVE')">通过</button>
+              <button class="sm danger" onclick="humanDecide(${r.item_id},'REJECT')">驳回</button>
+            </td>
+          </tr>`).join("");
+        [...tbody.querySelectorAll("tr")].forEach(tr =>
+          tr.onclick = () => selectItem(parseInt(tr.dataset.id, 10)));
+      }
+      return;
+    }
+
+    /* ---- 普通商品列表 ---- */
+    thead.innerHTML = HEAD_ITEMS;
+    const params = new URLSearchParams({ status: state.status, limit: state.limit, offset: state.offset });
+    if (state.q) params.set("q", state.q);
+    const d = await api("/items?" + params);
+    state.total = d.total;
+
+    if (!d.items.length) {
+      tbody.innerHTML = '<tr><td colspan="6" class="empty">没有符合条件的商品</td></tr>';
+    } else {
+      tbody.innerHTML = d.items.map(r => `
+        <tr data-id="${r.id}" class="${state.selected === r.id ? "sel" : ""}">
+          <td class="mono">#${r.id}</td>
+          <td>${esc(r.title)}</td>
+          <td style="color:var(--dim2);font-size:12px">${esc(r.category_name || "-")}</td>
+          <td class="mono num">${r.price}</td>
+          <td class="mono num ${r.credit_score < 70 ? "warn" : ""}">${r.credit_score}</td>
+          <td>${vtag(r.status === 1 ? "APPROVE" : r.status === 5 ? "REJECT" : null)}</td>
+        </tr>`).join("");
+      [...tbody.querySelectorAll("tr")].forEach(tr =>
+        tr.onclick = () => selectItem(parseInt(tr.dataset.id, 10)));
+    }
+
+    const pages = Math.max(1, Math.ceil(state.total / state.limit));
+    const page = Math.floor(state.offset / state.limit) + 1;
+    $("#pageInfo").textContent = `${page} / ${pages}`;
+    $("#listCount").textContent = `共 ${state.total} 件`;
+    $("#prev").disabled = state.offset <= 0;
+    $("#next").disabled = state.offset + state.limit >= state.total;
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="6" class="empty">加载失败：${esc(e.message)}</td></tr>`;
+  }
+}
+
+/* ---------------- 人工裁决 ---------------- */
+async function humanDecide(itemId, decision, remark) {
+  const label = decision === "APPROVE" ? "通过" : "驳回";
+  if (decision === "REJECT" && !confirm(`确认人工驳回 item#${itemId}？`)) return;
+  try {
+    const r = await api(`/items/${itemId}/human-decide`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ decision: decision, remark: remark || "", reviewer_id: 998 })
+    });
+    toast(`已人工${label} item#${itemId} · 记为「${r.audit_source_note}」`, "ok");
+    await refreshAll();
+    if (state.selected === itemId) selectItem(itemId);
+  } catch (e) {
+    toast("裁决失败：" + esc(e.message), "err");
+  }
+}
+
+/* ---------------- 详情 ---------------- */
+async function selectItem(id) {
+  state.selected = id;
+  [...document.querySelectorAll("#rows tr")].forEach(tr =>
+    tr.classList.toggle("sel", tr.dataset.id == id));
+
+  const box = $("#detailBody");
+  box.innerHTML = '<div class="empty"><span class="spin"></span>加载中…</div>';
+  try {
+    const d = await api(`/items/${id}/detail`);
+    renderDetail(d);
+  } catch (e) {
+    box.innerHTML = `<div class="empty">加载失败：${esc(e.message)}</div>`;
+  }
+}
+
+function renderDetail(d) {
+  const it = d.item, job = d.job, gt = d.ground_truth, review = d.review;
+  const steps = d.steps || [];
+  const hits = (job && job.rule_hits) || [];
+
+  const vColor = !job ? "var(--dim)" :
+    job.verdict === "APPROVE" ? "var(--green)" : job.verdict === "REJECT" ? "var(--red)" : "var(--yellow)";
+  const vText = !job ? "尚未审核" :
+    job.verdict === "APPROVE" ? "✅ 通过 —— 商品放行上架" :
+    job.verdict === "REJECT" ? "⛔ 驳回 —— 商品下架" : "🔍 转人工复核 —— 不判定违规";
+
+  const gtText = gt
+    ? `<span class="tag ${gt.expected === "APPROVE" ? "t-ok" : gt.expected === "REJECT" ? "t-no" : "t-REVIEW"}">
+         ${gt.expected === "APPROVE" ? "应为通过" : gt.expected === "REJECT" ? "应为驳回" : "应为转人工"}</span>
+       ${gt.violation_type ? `<span style="color:var(--dim2);font-size:11.5px;margin-left:6px">${gt.violation_type}</span>` : ""}`
+    : '<span style="color:var(--dim2)">无标注</span>';
+
+  let verdictHtml = "";
+  if (job) {
+    verdictHtml = `
+      <div class="verdictbox" style="border-left:3px solid ${vColor}">
+        <div class="vbig" style="color:${vColor}">${vText}</div>
+        <div class="v-line">
+          置信度 <b>${job.confidence}</b> · 决策来源 <b>${job.source}</b>
+          ${job.error ? ` · <span class="no">错误 ${esc(job.error)}</span>` : ""}
+        </div>
+        <div class="reason">${esc(job.reason || "")}</div>
+      </div>`;
+  } else {
+    verdictHtml = `<div class="verdictbox"><div class="vbig" style="color:var(--dim)">尚未审核</div>
+      <div class="v-line">点下方按钮提交审核</div></div>`;
+  }
+
+  /* ---- 人工裁决区：复核队列的出口 ---- */
+  const inReview = review && review.status === 0;
+  const decided  = review && review.status === 1;
+  let humanHtml = "";
+
+  if (inReview) {
+    humanHtml = `
+      <div class="sec" style="border-left:3px solid var(--yellow);background:#1a1810">
+        <h3 style="color:var(--yellow)">AI 拿不准，请人工复核</h3>
+        <div class="reason" style="margin-bottom:10px">${esc(review.reason)}</div>
+        <button class="primary" onclick="humanDecide(${it.id},'APPROVE')">✓ 复核通过</button>
+        <button class="danger" onclick="humanDecide(${it.id},'REJECT')" style="margin-left:8px">✕ 复核驳回</button>
+        <div style="font-size:11.5px;color:var(--dim2);margin-top:9px">
+          裁决记为 audit_source = 3（AI + 人工复核），<b>不改动 AI 的原始结论</b> ——
+          这样评测指标衡量的始终是 AI 自己判得准不准
+        </div>
+      </div>`;
+  } else if (decided) {
+    humanHtml = `
+      <div class="sec">
+        <h3>人工复核结果（audit_source = 3）</h3>
+        <div class="kv"><span>裁决</span><span>${review.decision === 1
+          ? '<span class="tag t-ok">通过</span>'
+          : review.decision === 2 ? '<span class="tag t-no">驳回</span>' : "-"}</span></div>
+        <div class="kv"><span>意见</span><span style="text-align:right">${esc(review.remark || "-")}</span></div>
+        <div class="kv"><span>时间</span><span class="mono">${esc(review.decided_at || "-")}</span></div>
+      </div>`;
+  } else if (job) {
+    humanHtml = `
+      <div class="sec">
+        <h3>人工改判（管理员介入 / 用户申诉）</h3>
+        <button class="sm" onclick="humanDecide(${it.id},'APPROVE')">改为通过</button>
+        <button class="sm danger" onclick="humanDecide(${it.id},'REJECT')" style="margin-left:6px">改为驳回</button>
+        <span style="font-size:11.5px;color:var(--dim2);margin-left:9px">
+          记为 audit_source = 1（纯人工）</span>
+      </div>`;
+  }
+
+  $("#detailBody").innerHTML = `
+    <div class="dhead">
+      <div class="dtitle">${esc(it.title)}</div>
+      <div class="dmeta">
+        <span class="mono">#${it.id}</span>
+        <span>${esc(it.category_name || "-")}</span>
+        <span>售价 <b class="mono">${it.price}</b>${it.original_price ? ` / 原价 <span class="mono">${it.original_price}</span>` : ""}</span>
+      </div>
+      <div class="dmeta" style="margin-top:5px">
+        <span>卖家 ${esc(it.seller || "-")}</span>
+        <span>信用 <b class="mono ${it.credit_score < 70 ? "warn" : "ok"}">${it.credit_score}</b></span>
+        <span>标注答案 ${gtText}</span>
+      </div>
+      <div style="margin-top:10px">
+        <button class="sm danger" onclick="deleteItem(${it.id})">✕ 下架商品</button>
+        <span style="font-size:11.5px;color:var(--dim2);margin-left:8px">
+          软删除，可恢复；排队中的任务会被取消</span>
+      </div>
+    </div>
+    ${verdictHtml}
+    ${humanHtml}
+    ${!job ? `<div class="sec"><button class="primary" onclick="submitOne(${it.id})">提交这件商品审核</button>
+      <span style="font-size:12px;color:var(--dim);margin-left:10px">把商品送进 AI 流水线，由系统判断结论（需要 worker 在运行）</span></div>` : ""}
+    ${hits.length ? `<div class="sec"><h3>规则命中（${hits.length} 条）</h3>
+      ${hits.map(h => `<div class="hit">
+        <span class="tag ${h.severity === "BLOCK" ? "t-BLOCK" : "t-REVIEWS"}">${h.severity}</span>
+        <div><div class="rid">${esc(h.rule_id)}</div><div class="det">${esc(h.detail)}</div></div>
+      </div>`).join("")}</div>` : ""}
+    ${steps.length ? `<div class="sec"><h3>执行轨迹（${steps.length} 步）</h3>
+      <div class="tl">${steps.map(s => `<div class="st">
+        <span class="k">${esc(s.kind)}</span>
+        <span style="flex:1;color:var(--dim);font-size:11.5px">step ${s.step_no}</span>
+        <span class="t">${s.latency_ms}ms</span>
+      </div>`).join("")}</div></div>` : ""}
+    <div class="sec"><h3>商品描述</h3>
+      <div style="font-size:12.5px;color:#a9bccd;line-height:1.7">${esc(it.description || "（无描述）")}</div>
+    </div>`;
+}
+
+/* ---------------- 提交审核 ---------------- */
+async function submitOne(id) {
+  try {
+    const r = await api("/audits", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ item_id: id })
+    });
+    toast(`已提交 #${id}（job ${r.job_id}），等待 worker 处理…`);
+    await waitJob(r.job_id);
+    await refreshAll();
+    if (state.selected === id) selectItem(id);
+  } catch (e) { toast("提交失败：" + esc(e.message), "err"); }
+}
+
+async function waitJob(jobId, maxTries = 40) {
+  for (let i = 0; i < maxTries; i++) {
+    await new Promise(r => setTimeout(r, 350));
+    const j = await api("/audits/" + jobId);
+    if (j.status === "succeeded" || j.status === "failed") return j;
+  }
+  return null;
+}
+
+async function submitAll() {
+  const btn = $("#btnAll");
+  btn.disabled = true;
+  try {
+    const r = await api("/audits/batch", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: 0, limit: 2000 })
+    });
+    if (!r.enqueued) { toast("没有待审核的商品了"); return; }
+    toast(`已投递 <b>${r.enqueued}</b> 件，worker 正在处理…`, "ok");
+    pollUntilIdle();
+  } catch (e) { toast("批量投递失败：" + esc(e.message), "err"); }
+  finally { btn.disabled = false; }
+}
+
+function pollUntilIdle() {
+  if (state.polling) return;
+  state.polling = true;
+  const timer = setInterval(async () => {
+    const running = await loadProgress();
+    await loadItems();
+    if (!running) {
+      clearInterval(timer);
+      state.polling = false;
+      toast("审核完成 ✅ 可以点「跑一轮评测」看指标", "ok");
+      await loadItems();
+    }
+  }, 1200);
+}
+
+/* ---------------- 评测 ---------------- */
+async function runEval() {
+  const btn = $("#btnEval");
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spin"></span>评测中…';
+  try {
+    const m = await api("/eval/run", { method: "POST" });
+    const runs = await api("/eval/runs?limit=10");
+    renderEval(m, runs);
+    toast(`评测完成：召回 ${m.recall_pct}% · 误杀 ${m.false_reject_pct}%`, "ok");
+  } catch (e) {
+    toast("评测失败：" + esc(e.message), "err");
+  } finally {
+    btn.disabled = false; btn.textContent = "跑一轮评测";
+  }
+}
+
+function renderEval(m, runs) {
+  $("#evalPanel").style.display = "";
+  $("#evalTag").textContent = "tag = " + m.tag + " · 样本 " + m.total + " 件";
+  const color = p => p >= 95 ? "var(--green)" : p >= 70 ? "var(--yellow)" : "var(--red)";
+  $("#evalBody").innerHTML = `
+    <div class="metrics">
+      <div class="metric"><div class="n" style="color:${color(m.recall_pct)}">${m.recall_pct}%</div>
+        <div class="l">违规召回率（漏 ${m.missed_count}）</div></div>
+      <div class="metric"><div class="n" style="color:${m.false_reject_pct > 0 ? "var(--red)" : "var(--green)"}">${m.false_reject_pct}%</div>
+        <div class="l">误杀率（误杀 ${m.false_reject_count}）</div></div>
+      <div class="metric"><div class="n" style="color:var(--blue)">${m.auto_rate_pct}%</div>
+        <div class="l">自动处理率</div></div>
+      <div class="metric"><div class="n" style="color:var(--yellow)">${m.review_rate_pct}%</div>
+        <div class="l">人工复核率</div></div>
+      <div class="metric"><div class="n">${m.agreement_pct}%</div><div class="l">与标注一致率</div></div>
+      <div class="metric"><div class="n">${m.llm_calls}</div><div class="l">LLM 调用次数</div></div>
+    </div>
+    <div style="font-size:12.5px;color:var(--dim);margin-bottom:12px">
+      按违规类型看召回：
+      ${Object.entries(m.recall_by_type).map(([k, v]) =>
+        `<span style="margin-right:16px">${k} <b class="mono" style="color:var(--fg)">${v.caught}/${v.total}</b>
+         <b style="color:${color(v.recall_pct)}">${v.recall_pct}%</b></span>`).join("")}
+    </div>
+    ${runs.length > 1 ? `
+      <h3 style="font-size:11.5px;color:var(--dim2);margin:14px 0 8px">历次轮次对比</h3>
+      <table class="cmp">
+        <tr><th>tag</th><th class="num">召回</th><th class="num">误杀</th>
+            <th class="num">自动处理</th><th class="num">复核</th><th class="num">一致率</th></tr>
+        ${runs.slice().reverse().map(r => `<tr>
+          <td class="mono">${esc(r.tag)}</td>
+          <td class="num" style="color:${color(r.recall_pct)}">${r.recall_pct}%</td>
+          <td class="num" style="color:${r.false_reject_pct > 0 ? "var(--red)" : "var(--green)"}">${r.false_reject_pct}%</td>
+          <td class="num">${r.auto_rate_pct}%</td>
+          <td class="num">${r.review_rate_pct}%</td>
+          <td class="num">${r.agreement_pct}%</td>
+        </tr>`).join("")}
+      </table>` : ""}
+    ${m.false_reject_items.length ? `
+      <h3 style="font-size:11.5px;color:var(--red);margin:16px 0 6px">误杀明细</h3>
+      ${m.false_reject_items.map(r =>
+        `<div style="font-size:12.5px;color:var(--dim)"><span class="mono">#${r.item_id}</span> ${esc(r.title)}</div>`).join("")}` : ""}
+    ${m.missed_items.length ? `
+      <h3 style="font-size:11.5px;color:var(--yellow);margin:16px 0 6px">漏放明细</h3>
+      ${m.missed_items.map(r =>
+        `<div style="font-size:12.5px;color:var(--dim)"><span class="mono">#${r.item_id}</span>
+         [${esc(r.violation_type)}] ${esc(r.title)} → 判 ${r.verdict}</div>`).join("")}` : ""}`;
+}
+
+/* ---------------- 重置 ---------------- */
+async function resetData() {
+  if (!confirm("把所有商品恢复为「待审核」，并清空任务、轨迹和复核队列？\n（标注答案和历次评测记录会保留）")) return;
+  try {
+    await api("/admin/reset", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ clear_evals: false })
+    });
+    state.selected = null; state.offset = 0;
+    $("#detailBody").innerHTML = '<div class="empty" style="padding:50px 0">已重置，点左边商品查看详情</div>';
+    $("#evalPanel").style.display = "none";
+    await refreshAll();
+    toast("已重置：所有商品回到待审核", "ok");
+  } catch (e) { toast("重置失败：" + esc(e.message), "err"); }
+}
+
+/* ---------------- 汇总刷新 ---------------- */
+async function refreshAll() { await loadProgress(); await loadItems(); await loadBudget(); await loadLatency(); }
+
+/* ---------------- 事件绑定 ---------------- */
+$("#btnAll").onclick = submitAll;
+$("#btnEval").onclick = runEval;
+$("#btnReset").onclick = resetData;
+$("#btnSearch").onclick = () => { state.q = $("#q").value.trim(); state.offset = 0; loadItems(); };
+$("#q").onkeydown = e => { if (e.key === "Enter") $("#btnSearch").onclick(); };
+$("#prev").onclick = () => { state.offset = Math.max(0, state.offset - state.limit); loadItems(); };
+$("#next").onclick = () => { state.offset += state.limit; loadItems(); };
+document.querySelectorAll("#tabs button").forEach(b => b.onclick = () => {
+  document.querySelectorAll("#tabs button").forEach(x => x.classList.remove("on"));
+  b.classList.add("on");
+  const s = b.dataset.status;
+  state.status = (s === "review") ? "review" : parseInt(s, 10);
+  state.offset = 0;
+  loadItems();
+});
+document.querySelectorAll("#chips .chip").forEach(c => c.onclick = () => {
+  $("#q").value = c.dataset.q;
+  state.q = c.dataset.q; state.offset = 0;
+  document.querySelectorAll("#tabs button").forEach(x => x.classList.remove("on"));
+  document.querySelector('#tabs button[data-status="-1"]').classList.add("on");
+  state.status = -1;
+  loadItems();
+});
+
+/* ---------------- 新增 / 下架 商品 ---------------- */
+async function openAddDialog() {
+  try {
+    const cats = await api("/categories");
+    if (!cats.categories.length) return toast("没有任何分类，先跑 scripts/bootstrap.py", "err");
+    $("#addCategory").innerHTML =
+      cats.categories.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join("");
+  } catch (e) {
+    return toast("取分类失败：" + e.message, "err");
+  }
+  ["addTitle", "addDesc", "addPrice", "addOriginal"].forEach(id => { $("#" + id).value = ""; });
+  $("#addAutoAudit").checked = true;
+  $("#addErr").style.display = "none";
+  $("#addMask").style.display = "flex";
+  $("#addTitle").focus();
+}
+
+function closeAddDialog() { $("#addMask").style.display = "none"; }
+
+function addErr(msg) {
+  const el = $("#addErr");
+  el.textContent = msg;
+  el.style.display = "block";
+}
+
+async function submitAddItem() {
+  const title = $("#addTitle").value.trim();
+  const priceRaw = $("#addPrice").value.trim();
+  const price = parseFloat(priceRaw);
+  const origRaw = $("#addOriginal").value.trim();
+
+  if (!title) return addErr("标题不能为空");
+  if (priceRaw === "" || isNaN(price) || price < 0) return addErr("售价要填一个 ≥ 0 的数字");
+  if (origRaw !== "" && !isNaN(parseFloat(origRaw)) && parseFloat(origRaw) < price) {
+    // 不拦截，只提示：原价低于售价本来就是规则层的可疑信号，正好用来演示
+    toast("注意：原价低于售价，规则层会判为「价格可疑」", "err");
+  }
+
+  const btn = $("#btnAddSubmit");
+  btn.disabled = true;
+  btn.textContent = "创建中…";
+  $("#addErr").style.display = "none";
+  try {
+    const r = await api("/items", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        title,
+        description: $("#addDesc").value.trim(),
+        price,
+        original_price: origRaw === "" ? null : parseFloat(origRaw),
+        category_id: parseInt($("#addCategory").value, 10),
+        auto_audit: $("#addAutoAudit").checked,
+      }),
+    });
+    closeAddDialog();
+    toast(`已新增 <b>#${r.item_id}</b>${r.job_id ? "，审核任务已投递" : "（未投递审核）"}`, "ok");
+    await refreshAll();
+    showDetail(r.item_id);
+  } catch (e) {
+    addErr("新增失败：" + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "创建并发起审核";
+  }
+}
+
+async function deleteItem(itemId) {
+  if (!confirm(`确定下架商品 #${itemId}？\n\n默认是软删除，可以恢复；` +
+               `该商品排队中的审核任务会被一并取消。`)) return;
+  try {
+    const r = await api(`/items/${itemId}`, { method: "DELETE" });
+    toast(`已下架 <b>#${itemId}</b>` +
+          (r.cancelled_jobs ? `，取消了 ${r.cancelled_jobs} 个排队中的任务` : ""), "ok");
+    state.selected = null;
+    $("#detailBody").innerHTML =
+      `<div class="empty" style="padding:50px 0">商品已下架</div>`;
+    await refreshAll();
+  } catch (e) {
+    toast("下架失败：" + e.message, "err");
+  }
+}
+
+$("#btnAdd").onclick = openAddDialog;
+$("#addMask").addEventListener("click", e => { if (e.target.id === "addMask") closeAddDialog(); });
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape" && $("#addMask").style.display === "flex") closeAddDialog();
+});
+
+refreshAll();
+setInterval(() => { if (!state.polling) { loadProgress(); loadBudget(); loadLatency(); } }, 5000);
+</script>
+<!-- ==================== 新增商品弹窗 ==================== -->
+<style>
+  #addMask { display:none; position:fixed; inset:0; background:rgba(0,0,0,.62);
+             z-index:100; align-items:center; justify-content:center; }
+  #addMask .box { background:var(--panel); border:1px solid var(--line); border-radius:10px;
+                  padding:20px 20px 16px; width:540px; max-width:92vw; max-height:88vh; overflow:auto; }
+  #addMask label.fl { display:block; font-size:11.5px; color:var(--dim2); margin:12px 0 5px; }
+  #addMask input[type=text], #addMask input[type=number],
+  #addMask textarea, #addMask select {
+    width:100%; box-sizing:border-box; background:var(--bg); border:1px solid var(--line);
+    border-radius:6px; color:var(--fg); padding:8px 10px; font-size:13px;
+    font-family:inherit; outline:none; }
+  #addMask input:focus, #addMask textarea:focus, #addMask select:focus { border-color:var(--blue); }
+  #addMask textarea { resize:vertical; }
+</style>
+
+<div id="addMask">
+  <div class="box">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <h3 style="margin:0;font-size:15px">新增商品</h3>
+      <button class="sm" onclick="closeAddDialog()">✕</button>
+    </div>
+
+    <label class="fl">标题 <span style="color:var(--red)">*</span></label>
+    <input type="text" id="addTitle" maxlength="100" placeholder="例如：高等数学 同济第七版 上册">
+
+    <label class="fl">描述</label>
+    <textarea id="addDesc" rows="3"
+      placeholder="成色、附件、交易方式… 试试写「论文代写」或「微信 abc123」，看规则会不会命中"></textarea>
+
+    <div style="display:flex;gap:10px">
+      <div style="flex:1">
+        <label class="fl">售价 <span style="color:var(--red)">*</span></label>
+        <input type="number" id="addPrice" min="0" step="0.01" placeholder="25">
+      </div>
+      <div style="flex:1">
+        <label class="fl">原价（可选）</label>
+        <input type="number" id="addOriginal" min="0" step="0.01" placeholder="49.8">
+      </div>
+    </div>
+
+    <label class="fl">分类 <span style="color:var(--red)">*</span></label>
+    <select id="addCategory"></select>
+
+    <label style="display:flex;align-items:center;gap:8px;margin:14px 0 4px;
+                  font-size:12.5px;color:var(--dim);cursor:pointer">
+      <input type="checkbox" id="addAutoAudit" checked style="width:auto;margin:0">
+      建完立刻投递审核
+    </label>
+
+    <div id="addErr" style="display:none;margin-top:10px;padding:8px 10px;border-radius:6px;
+         background:#2a1a1a;border:1px solid var(--red);color:var(--red);font-size:12.5px"></div>
+
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+      <button onclick="closeAddDialog()">取消</button>
+      <button class="primary" id="btnAddSubmit" onclick="submitAddItem()">创建并发起审核</button>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>
