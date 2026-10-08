@@ -30,9 +30,26 @@ CREATE TABLE audit_jobs (
   duration_ms INT DEFAULT NULL COMMENT '处理耗时（不含排队等待）',
   attempts    INT NOT NULL DEFAULT 0,
   error       TEXT,
+  -- ★ 活跃任务唯一键的载体（MySQL 没有「部分索引」，用生成列绕过去）
+  --
+  -- 需求：同一个「商品 + 内容指纹」最多只能有 **一个活跃任务**（pending/running），
+  --       但历史任务（succeeded/failed）可以有任意多条 —— 那是审计记录，要留着。
+  --
+  -- 做法：活跃时生成列 = "itemId:fingerprint"，非活跃时为 NULL；
+  --       而 MySQL 的唯一键**忽略 NULL**，于是天然只对活跃行生效。
+  --
+  -- ⚠ 这个键曾经只存在于开发机的库里、漏写进了建表文件。后果是：
+  --   任何人拉下来建新库，并发投递同一内容的幂等就完全失效。
+  --   这个不一致是 CI 抓出来的 —— 全新库上 6 个并发插入全都成功，本该只有 1 个。
+  --   （教训：**建表文件必须能从一个空库跑出和应用一致的库**，否则项目只在自己机器上活着。）
+  live_key    VARCHAR(128) GENERATED ALWAYS AS (
+                IF(status IN ('pending', 'running'),
+                   CONCAT(item_id, ':', IFNULL(fingerprint, '')), NULL)
+              ) VIRTUAL COMMENT '活跃任务唯一键载体；非活跃为 NULL',
   created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
+  UNIQUE KEY uk_live (live_key),
   KEY idx_queue (status, created_at),
   KEY idx_item_id (item_id),
   KEY idx_idem (item_id, fingerprint, status),

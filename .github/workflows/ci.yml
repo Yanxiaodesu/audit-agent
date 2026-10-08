@@ -54,32 +54,92 @@ jobs:
       - name: 初始化数据库
         run: python scripts/bootstrap.py --wait 90
 
+      # ------------------------------------------------------------
+      # ★ 必须先跑一遍流水线，库才算「就绪」。
+      #
+      # seed_data.py 把 200 件商品全灌成 status=0（待审核），这是为了
+      # 演示「从待审核开始跑审核」的完整闭环。但有两处依赖「已审核」状态：
+      #
+      #   1. 检索工具只搜 status IN (1,5) 的商品
+      #      → 全新库上一条都搜不到
+      #   2. 部分测试断言参照物带驳回规则，那要 item_audit 里有记录
+      #      → 全新库里是空的
+      #
+      # 开发机上一直是「已审核」状态（手动跑过很多次），所以本地全绿；
+      # 换任何一台干净机器/新库，这 4 个检索测试必然失败。
+      # **这个环境依赖是 CI 从空库建起才暴露的。**
+      #
+      # 在这里跑一遍（mock 模式，约 1 秒）既让库达到正确状态，
+      # 又顺带验证了「初始化 → 投递 → 消费 → 落库」这条主链路。
+      # ------------------------------------------------------------
+      - name: 跑一遍流水线，让库达到「已审核」状态
+        run: |
+          set -e
+          nohup python -m uvicorn app.main:app --host 127.0.0.1 --port 8100 \
+            --log-level warning > /tmp/api.log 2>&1 &
+          echo "等待 API 就绪 ..."
+          for i in $(seq 1 40); do
+            curl -sf http://127.0.0.1:8100/health > /dev/null && break
+            sleep 2
+          done
+          curl -sf http://127.0.0.1:8100/health > /dev/null || { cat /tmp/api.log; exit 1; }
+
+          echo "投递全部待审核商品 ..."
+          curl -sf -X POST http://127.0.0.1:8100/audits/batch \
+            -H 'Content-Type: application/json' -d '{"status":0,"limit":2000}'
+          echo
+
+          echo "消费队列 ..."
+          python -u worker.py --drain --quiet
+
+          echo "流水线后的库状态："
+          python -c "
+          import pymysql
+          from pymysql.cursors import DictCursor
+          from app.config import BIZ_DB, META_DB, DB_CONFIG
+          cfg = {k: v for k, v in DB_CONFIG.items() if k != 'database'}
+          c = pymysql.connect(database=BIZ_DB, cursorclass=DictCursor, **cfg)
+          cur = c.cursor()
+          cur.execute('SELECT status, COUNT(*) n FROM item GROUP BY status ORDER BY status')
+          print('  item.status 分布:', cur.fetchall())
+          cur.execute('SELECT COUNT(*) n FROM item_audit')
+          print('  item_audit 行数:', cur.fetchone()['n'])
+          c.close()
+          "
+
       - name: 跑测试套件
         run: python -m pytest tests/ -q
 
-      - name: 起 API 与 worker
-        run: |
-          python -m uvicorn app.main:app --host 127.0.0.1 --port 8100 --log-level warning &
-          python -u worker.py --interval 0.3 --quiet &
-          sleep 10
-
       - name: 端到端冒烟
-        run: python scripts/smoke.py --base-url http://127.0.0.1:8100
+        run: |
+          set -e
+          # API 由上一步用 nohup 起着；这里只需要一个 worker
+          curl -sf http://127.0.0.1:8100/health > /dev/null \
+            || { echo "API 掉了"; cat /tmp/api.log; exit 1; }
+          nohup python -u worker.py --interval 0.3 --quiet > /tmp/worker.log 2>&1 &
+          sleep 5
+          python scripts/smoke.py --base-url http://127.0.0.1:8100
 
       - name: 失败时打印服务日志
         if: failure()
         run: |
-          echo "--- 队列状态 ---"
+          echo "======== API 日志 ========"
+          cat /tmp/api.log || true
+          echo "======== worker 日志 ========"
+          cat /tmp/worker.log || true
+          echo "======== 队列状态 ========"
           python -c "
           import pymysql
           from pymysql.cursors import DictCursor
-          c = pymysql.connect(host='127.0.0.1', user='root', password='root',
-                              database='audit_agent', cursorclass=DictCursor)
+          from app.config import META_DB, DB_CONFIG
+          cfg = {k: v for k, v in DB_CONFIG.items() if k != 'database'}
+          c = pymysql.connect(database=META_DB, cursorclass=DictCursor, **cfg)
           cur = c.cursor()
           cur.execute('SELECT status, COUNT(*) n FROM audit_jobs GROUP BY status')
           print(cur.fetchall())
           cur.execute('SELECT id, item_id, error FROM audit_jobs WHERE status=\"failed\" LIMIT 5')
           print(cur.fetchall())
+          c.close()
           "
 
   # ============================================================

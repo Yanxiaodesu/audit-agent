@@ -258,6 +258,17 @@ def search_similar_items(item_id: int | None = None, query: str | None = None,
         r["category_id"] = int(r["category_id"]) if r["category_id"] else None
         r.pop("status", None)
 
+    # ★ 必须先转成 list 再 sort。
+    #
+    # PyMySQL 的 fetchall() 返回的是 **tuple**，tuple 没有 .sort()。
+    # 上面那条「相对阈值过滤」只在**查到了结果**时执行，才会把 rows 变成 list；
+    # 所以「一条都没查到」时 rows 还是个空 tuple，这里直接
+    #   AttributeError: 'tuple' object has no attribute 'sort'
+    #
+    # 这个 bug 本地一直没暴露：本地库数据多，全文检索从没返回过空。
+    # CI 用全新的种子库，一查就空，立刻炸出「检索不到」这条路径 ——
+    # 而那恰恰是必须正常工作的一条（要如实告诉模型「孤立表述」，不能报错）。
+    rows = list(rows)
     if not fallback:
         rows.sort(key=lambda r: -r["similarity"])
     rows = rows[:limit]
